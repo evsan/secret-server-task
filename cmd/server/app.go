@@ -8,12 +8,11 @@ import (
 	"strconv"
 	"strings"
 
+	sst "github.com/evsan/secret-server-task"
+	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	sst "github.com/evsan/secret-server-task"
-	"github.com/gorilla/mux"
 	"github.com/urfave/negroni"
 )
 
