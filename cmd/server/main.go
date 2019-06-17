@@ -18,6 +18,7 @@ func main() {
 
 	var storage sst.Storage
 	var db *sqlx.DB
+
 	if *dbUrl != "" {
 		db = sqlx.MustConnect("postgres", *dbUrl)
 		storage = sst.NewPgStorage(db)

@@ -5,5 +5,5 @@
 *.so
 *.dylib
 *.out
-.idea/*
+.idea/
 *.iml

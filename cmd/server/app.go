@@ -8,6 +8,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	sst "github.com/evsan/secret-server-task"
 	"github.com/gorilla/mux"
 	"github.com/urfave/negroni"
@@ -19,6 +23,14 @@ type App struct {
 	MetricsAddr string
 	Debug       bool
 	Marshalers  map[string]Marshaler
+	Metrics     Metrics
+}
+
+type Metrics struct {
+	secretGetCounter   prometheus.Counter
+	secretPostCounter  prometheus.Counter
+	secretGetDuration  prometheus.Summary
+	secretPostDuration prometheus.Summary
 }
 
 // Accept Header
@@ -31,6 +43,7 @@ type Marshaler struct {
 }
 
 func (a *App) Run() {
+	a.initMetrics()
 	a.initMarchalers()
 
 	apiRouter := mux.NewRouter()
@@ -39,8 +52,12 @@ func (a *App) Run() {
 	apiRouter.HandleFunc("/secret/{hash}", a.getSecretHandler).Methods(http.MethodGet)
 	apiRouter.HandleFunc("/secret", a.storeSecretHandler).Methods(http.MethodPost)
 
+	metricsRouter := mux.NewRouter()
+	metricsRouter.StrictSlash(true)
+	metricsRouter.Handle("/metrics", promhttp.Handler())
+
 	go func() {
-		err := http.ListenAndServe(a.MetricsAddr, http.HandlerFunc(a.metricsHandler))
+		err := http.ListenAndServe(a.MetricsAddr, metricsRouter)
 		if err != nil {
 			log.Println("metrics are not available")
 		}
@@ -67,15 +84,11 @@ func (a *App) CorsMiddleware() negroni.HandlerFunc {
 	}
 }
 
-func (a *App) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	_, err := w.Write([]byte("metrics hello!"))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-}
-
 func (a *App) getSecretHandler(w http.ResponseWriter, r *http.Request) {
+	a.Metrics.secretGetCounter.Inc()
+	timer := prometheus.NewTimer(a.Metrics.secretGetDuration)
+	defer timer.ObserveDuration()
+
 	vars := mux.Vars(r)
 	key := vars["hash"]
 	s, err := a.Storage.Get(key)
@@ -87,6 +100,10 @@ func (a *App) getSecretHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) storeSecretHandler(w http.ResponseWriter, r *http.Request) {
+	a.Metrics.secretPostCounter.Inc()
+	timer := prometheus.NewTimer(a.Metrics.secretPostDuration)
+	defer timer.ObserveDuration()
+
 	err := r.ParseForm()
 	if err != nil {
 		http.Error(w, "Invalid input", http.StatusMethodNotAllowed)
@@ -163,4 +180,28 @@ func (a *App) getMarshaler(acceptHeader string) Marshaler {
 		}
 	}
 	return Marshaler{}
+}
+
+func (a *App) initMetrics() {
+	a.Metrics.secretGetCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "secret_get_requests_total",
+		Help: "The total number of GET /secret/{hash} requests",
+	})
+
+	a.Metrics.secretPostCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "secret_post_requests_total",
+		Help: "The total number of POST /secret requests",
+	})
+
+	a.Metrics.secretPostDuration = promauto.NewSummary(prometheus.SummaryOpts{
+		Name:       "secret_post_request_duration",
+		Help:       "Histogram for the POST /secret response time",
+		Objectives: map[float64]float64{0.5: 0.1, 0.9: 0.01, 0.99: 0.001},
+	})
+
+	a.Metrics.secretGetDuration = promauto.NewSummary(prometheus.SummaryOpts{
+		Name:       "secret_get_request_duration",
+		Help:       "Histogram for the GET /secret/{hash} response time",
+		Objectives: map[float64]float64{0.5: 0.1, 0.9: 0.01, 0.99: 0.001},
+	})
 }
